@@ -1,0 +1,132 @@
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+
+
+
+  {%- seo -%}
+  <script src="//code.jquery.com/jquery-1.12.4.js"></script>
+  <script src="//code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+  <style>
+    
+    button[class^=collapse], button#toggle-active{
+    color: #fff;
+    background-color: #007bff;
+    border-color: #007bff;
+    border: 1px solid transparent;
+    display: inline-block;
+    font-weight: 400;
+    text-align: center;
+    vertical-align: middle;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    padding: .375rem .75rem;
+    font-size: 1rem;
+    line-height: 1.5;
+    border-radius: .25rem;
+    transition: color .15s ease-in-out,background-color .15s ease-in-out,border-color .15s ease-in-out,box-shadow .15s ease-in-out;
+    }
+    button#toggle-active{
+      right:0;
+      position: fixed;
+      border-radius: 0;
+      background-color: #458;
+      border-color:#458;
+      top: -2px;
+      border: none;
+      transition: none;
+    }
+
+    div[class^=collapse]{
+      display: none;
+      margin-bottom: 0.25rem;
+    }
+      div[class^=collapse] ul{
+        margin-bottom: 0;
+      }
+      div[class^=collapse] .textblock{
+        border-radius: .25rem;
+        
+        background-color:#418ef31c;
+        padding: .75rem;
+      }
+    
+  </style>
+   <script>
+    window.onload = function(){
+      $("div[class^=collapse]").each(
+        function(i, elem){
+          console.log(elem);
+          var p = document.createElement('p');
+          var btn = document.createElement('button');
+          btn.className = elem.className;
+          btn.innerText = "Show/Hide";
+          btn.onclick = () => {$('div.' + elem.className).toggle();};
+          p.appendChild(btn)
+          elem.parentNode.insertBefore(p, elem);
+        }
+      )
+      $('#toggle-active').click(function(){
+        if (this.className == 'active'){
+          this.className = 'inactive';
+          $("div[class^=collapse]").each(
+            (idx, i)=>{i.style.display = 'block'});
+          $("button[class^=collapse]").each(
+            (idx, i)=>{i.style.display = 'none'});
+        }
+        else{
+          this.className = 'active';
+          $("div[class^=collapse]").each(
+            (idx, i)=>{i.style.display = 'none'});
+          $("button[class^=collapse]").each(
+            (idx, i)=>{i.style.display = 'block'});
+        }
+      })
+
+
+    }
+  </script>
+ 
+  <link rel="stylesheet" href="{{ "/assets/main.css" | relative_url }}">
+  <style>
+    blockquote{
+      margin: 1rem; 
+    }
+    blockquote p {
+      /* padding: .5rem; */
+      /* border-color: black;
+      border: 1px solid; */
+      font-family: Georgia, 'Times New Roman', Times, serif;
+      /* border-radius: .25rem; */
+      /* margin: 1rem; */
+      color: #555;
+      font-style: normal;
+      letter-spacing: normal;
+    }
+  </style>
+
+<script type="text/x-mathjax-config">
+  MathJax.Hub.Config({
+    jax: ["input/TeX", "output/HTML-CSS"],
+    tex2jax: {
+      inlineMath: [ ['$', '$'], ["\\(", "\\)"] ],
+      displayMath: [ ['$$', '$$'], ["\\[", "\\]"] ],
+      processEscapes: true,
+      skipTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+    }
+    //,
+    //displayAlign: "left",
+    //displayIndent: "2em"
+  });
+</script>
+<script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
+
+  {%- feed_meta -%}
+  {%- if jekyll.environment == 'production' and site.google_analytics -%}
+    {%- include google-analytics.html -%}
+  {%- endif -%}
+</head>
