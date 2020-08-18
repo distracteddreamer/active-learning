@@ -19,9 +19,6 @@ It is helpful to consider the shapes of the inputs as they get transformed at ea
 
 One way to handle masking is to set the positions where `mask=False` to a negative value with large magnitude such that its softmax score is almost zero and has negligible effect on the scores of the values where `mask=True`.
 
-<button markdown="0" class="collapse-scaled_dot_product_attention">
-    Show/Hide
-</button>
 <div markdown="0" class="collapse-scaled_dot_product_attention">
 <div markdown="1">
 ```python
@@ -57,9 +54,7 @@ Implementation details:
     - ReLU activation after first layer
     - Output dimension of 512
 
-<button class="collapse-FeedForward" markdown="0">
-    Show/Hide
-</button>
+
 <div class="collapse-FeedForward" markdown="0">
 <div markdown="1">
 ```python
