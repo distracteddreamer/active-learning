@@ -4,7 +4,7 @@ title:  "Another Annotated Transformer"
 date:   2020-08-04 19:52:13 +0100
 categories: jekyll update
 ---
-## Scaled Dot-Product Attention
+# Scaled Dot-Product Attention
 
 >We call our particular attention "Scaled Dot-Product Attention" (Figure 2). The input consists of queries and keys of dimension d , and values of dimension d . We compute the dot products of the
 k√v
@@ -38,7 +38,10 @@ One way to handle masking is to set the positions where `mask=False` to a negati
 </div>
 </div>
 
-## Position-wise Feed-Forward Networks
+# Masking
+> We also modify the self-attention sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This masking, combined with fact that the output embeddings are offset by one position, ensures that the predictions for position $i$ can depend only on the known outputs at positions less than $i$.
+
+# Position-wise Feed-Forward Networks
 
 >[E]ach of the layers in our encoder and decoder contains a fully connected feed-forward network, which is applied to each position separately and identically. This consists of two linear transformations with a ReLU activation in between.
 FFN(x) = max(0, xW1 + b1 )W2 + b2 (2)
@@ -69,3 +72,142 @@ class FeedForward(tf.keras.models.Model):
 ```
 </div>
 </div>
+
+# Encoder
+> The encoder is composed of a stack of N = 6 identical layers. Each layer has two sub-layers. The first is a multi-head self-attention mechanism, and the second is a simple, position- wise fully connected feed-forward network. We employ a residual connection [11] around each of the two sub-layers, followed by layer normalization [1]. That is, the output of each sub-layer is LayerNorm(x + Sublayer(x)), where Sublayer(x) is the function implemented by the sub-layer itself. To facilitate these residual connections, all sub-layers in the model, as well as the embedding layers, produce outputs of dimension dmodel = 512.
+
+Let us start by building the Sublayer block shown below. One way to implement it is to implement a `ResidualBlock` module, in which the sublayer, Add & Norm and the residual connection are contained in a single block. Here sublayer is some arbitrary module passed in as input. This block will then be used in the `FeedForward` and  `MultiHeadedAttention` blocks. These are the key details:
+- Sublayer (FeedForward or MultiHeaded Attention)
+- Followed by LayerNorm
+- With residual connection
+- All layers have same output dimensions of d_model
+
+Hint: sublayers can have had an arbitrary number of inputs for example, query, key and value and mask(s) are required for the multi-headed attention. Think about how to handle that.
+
+<div class="collapse-Sublayer">
+<div markdown="1">
+```python
+class ResidualBlock(tf.keras.models.Model):
+    def __init__(self, sublayer):
+        super(ResidualBlock, self).__init__()
+        self.sublayer = sublayer
+        self.layer_norm = tf.keras.layers.LayerNormalization()
+
+    def __call__(self, x, *inputs):
+        return self.layer_norm(x + self.sublayer(x, *inputs))
+```
+</div>
+</div>
+Now we can use this component block to construct a module `EncoderBlock`, which will be the building block of the encoder:
+
+- Multi-Head Attention sublayer block with self-attention so input is used as key, query and value
+- Followed by FeedForward sublayer block
+- Encoder masking will be used in the attention block
+
+Hint: it might be helpful to use pass in the input as a `QueryKeyValue` data structure defined earlier.
+
+<div class="collapse-EncoderBlock">
+<div markdown="1">
+```python
+class EncoderBlock(tf.keras.models.Model):
+                        def __init__(self, dim, ff_dim, num_heads, dropout):
+                            super(EncoderBlock, self).__init__()
+                            self.attn_block = ResidualBlock(MultiHeadAttention(dim, num_heads, dropout))
+                            self.ff_block = ResidualBlock(FeedForward(hidden_dim=ff_dim,
+                                                                    output_dim=dim))
+                    
+                        def __call__(self, x, pos, mask):
+                            out = self.attn_block(x.query, [x, pos, mask])
+                            out = self.ff_block(out)
+                            return out
+```
+</div>
+</div>
+
+Finally we can put together the `Encoder`, which consists of a stack of N encoder blocks. 
+
+<div markdown="1" class="collapse-Encoder">
+```python
+class Encoder(tf.keras.models.Model):
+                    def __init__(self, dim, ff_dim, num_heads, dropout, num_blocks):
+                        super(Encoder, self).__init__()
+                        self.blocks = [
+                            EncoderBlock(dim, ff_dim, num_heads, dropout)
+                            for _ in range(num_blocks)
+                        ]
+
+                    def __call__(self, x, pos, mask):
+                        inputs = x
+                        for block in self.blocks:
+                            x = block(inputs, pos, mask)
+                            inputs = QueryKeyValue(x)
+                        return x
+```
+</div>
+
+# Decoder
+
+> The decoder is also composed of a stack of N = 6 identical layers. In addition to the two sub-layers in each encoder layer, the decoder inserts a third sub-layer, which performs multi-head attention over the output of the encoder stack. Similar to the encoder, we employ residual connections around each of the sub-layers, followed by layer normalization. We also modify the self-attention sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This masking, combined with fact that the output embeddings are offset by one position, ensures that the predictions for position i can depend only on the known outputs at positions less than i.
+
+Let us write a `DecoderBlock`. The decoder block consists of the following:
+- The two sublayers in the encoder block.
+- An additional attention layer which has key and value inputs from the encoder.
+
+Hint: it will be very similar to `EncoderBlock` but remember that the inputs to the final `AttentionBlock` will be different. Can you reuse `EncoderBlock`?
+
+<div class="collapse-DecoderBlock">
+<div markdown="1">
+```python
+class DecoderBlock(tf.keras.models.Model):
+    def __init__(self, dim, ff_dim, num_heads, dropout, skip_attn=False):
+        super(DecoderBlock, self).__init__()
+        self.skip_attn = skip_attn
+        if not skip_attn:
+            self.self_attn_block = ResidualBlock(
+                MultiHeadAttention(dim, num_heads, dropout)
+            )
+        self.memory_block = EncoderBlock(dim, ff_dim, num_heads, dropout)
+
+    def __call__(self, x, pos, decoder_mask, memory_mask):
+        if not self.skip_attn:
+            y = self.self_attn_block(x.query,
+                                    [QueryKeyValue(x.query),
+                                    QueryKeyValue(pos.query),
+                                    decoder_mask])
+            x = QueryKeyValue(y, x.key, x.value)
+        out = self.memory_block(x, pos, memory_mask)
+        return out
+```
+</div>
+</div>
+
+The decoder network will be very similar to the encoder except that it will receive two different mask inputs, one for self-attention and the other for the encoder outputs. Since intermediate outputs are sometimes used to train auxiliary losses, considering adding the option to return all the outputs.  
+
+<div class="collapse-Decoder">
+<div markdown="1">
+```python
+class Decoder(tf.keras.models.Model):
+    def __init__(self, dim, ff_dim, num_heads, dropout, num_blocks,
+                skip_first_attn=False):
+        super(Decoder, self).__init__()
+        self.blocks = [
+            DecoderBlock(dim, ff_dim, num_heads, dropout,
+                        skip_attn=(i == 0) and skip_first_attn)
+            for i in range(num_blocks)
+        ]
+
+    def __call__(self, x, decoder_mask, memory_mask, return_all=False):
+        outputs = [x.query]
+        for block in self.blocks:
+            # TODO: is this the right approach?
+            outputs.append(
+                block(QueryKeyValue(outputs[-1], x.key, x.value),
+                    pos, decoder_mask, memory_mask)
+            )
+        if return_all:
+            return outputs
+        return [outputs[-1]]
+```
+</div>
+</div>
+

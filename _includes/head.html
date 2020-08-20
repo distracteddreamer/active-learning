@@ -38,9 +38,19 @@
       border-color:#458;
       top: -2px;
       border: none;
-      transition: none;
+      opacity: 70%;
+      display: none;
+      transition: color .15s ease-in-out,background-color .15s ease-in-out,border-color .15s ease-in-out,box-shadow .15s ease-in-out;
     }
 
+    /* @media screen and (min-width: 600px) {
+      button#toggle-active{
+      right:0;
+      }
+    } */
+    button#toggle-active:hover{
+      opacity: 90%;
+    }
     div[class^=collapse]{
       display: none;
       margin-bottom: 0.25rem;
@@ -60,7 +70,6 @@
     window.onload = function(){
       $("div[class^=collapse]").each(
         function(i, elem){
-          console.log(elem);
           var p = document.createElement('p');
           var btn = document.createElement('button');
           btn.className = elem.className;
@@ -87,6 +96,21 @@
         }
       })
 
+      var resizeBtn = function(){
+        if ($(window).scrollTop() >= 50) { 
+          $("#toggle-active").css({"display":"block"})
+        }
+        else{
+          $("#toggle-active").css({"display":"none"})
+          // $("#toggle-active").css({
+          //   "right":(window.matchMedia("(min-width: 600px)").matches)?"0px":"70px",
+          //  "top":"-2px"})
+        }
+      }
+      
+      $(window).on('scroll', resizeBtn);
+
+      //window.matchMedia("(min-width: 600px)").addListener(resizeBtn);
 
     }
   </script>
