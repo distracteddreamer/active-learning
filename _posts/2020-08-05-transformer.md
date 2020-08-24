@@ -22,18 +22,18 @@ One way to handle masking is to set the positions where `mask=False` to a negati
 <div markdown="0" class="collapse-scaled_dot_product_attention">
 <div markdown="1">
 ```python
-    def scaled_dot_product_attention(x, mask, mask_value=-1e9):
-        # (B, d', N_kv)
-        key_t = tf.transpose(x.key, [0, 2, 1])
-        scale_factor = (1 / tf.shape(x.query)[-1])
-        # (B, N_q, N_kv)
-        alpha_term = scale_factor * (x.query @ key_t)
-        # (B, N_q, N_kv)
-        alpha = tf.nn.softmax(
-            tf.where(mask, mask_value, alpha_term), 
-            axis=-1)
-        # (B, N_q, N_kv) @ (B, N_kv, d') -> (B, N_q, d')
-        return alpha @ x.value
+def scaled_dot_product_attention(x, mask, inf=1e9):
+    # x: (query=(B, H, N_q, d), key=(B, H, N_kv, d), value=(B, H, N_kv, d))
+    # mask: (B, 1, N_q, N_kv) or (B, 1, 1, N_kv)
+    dim = tf.cast(tf.shape(x.query)[-1], tf.float32)
+    # (B, H, N_q, N_kv)
+    # The einsum here is the same as QK^T
+    alpha_term = tf.einsum('bhqd,bhkd->bhqk', x.query, x.key) / tf.sqrt(dim)
+    # (B, H, N_q, N_kv)
+    alpha_term = tf.where(mask, alpha_term, -inf)
+    alpha = tf.nn.softmax(alpha_term)
+    # (B, H, N_q, N_kv) @ (B, H, N_kv, d') -> (B, H, N_q, d')
+    return alpha @ x.value
 ```
 </div>
 </div>
@@ -64,11 +64,13 @@ Implementation details:
 class FeedForward(tf.keras.models.Model):
     def __init__(self, hidden_dim, output_dim):
         super(FeedForward, self).__init__()
-        self.dense1 = tf.keras.layers.Dense(hidden_dim, activation='relu')
+        self.dense1 = tf.keras.layers.Dense(hidden_dim,
+                                            activation='relu')
         self.dense2 = tf.keras.layers.Dense(output_dim)
 
     def __call__(self, x):
-        return self.dense2(self.dense1(x))
+        x = self.dense2(self.dense1(x))=
+        return x
 ```
 </div>
 </div>
@@ -88,13 +90,16 @@ Hint: sublayers can have had an arbitrary number of inputs for example, query, k
 <div markdown="1">
 ```python
 class ResidualBlock(tf.keras.models.Model):
-    def __init__(self, sublayer):
+    def __init__(self, sublayer, dropout=0.0):
         super(ResidualBlock, self).__init__()
         self.sublayer = sublayer
+        self.dropout_layer = get_dropout_layer(dropout)
         self.layer_norm = tf.keras.layers.LayerNormalization()
 
-    def __call__(self, x, *inputs):
-        return self.layer_norm(x + self.sublayer(x, *inputs))
+    def __call__(self, x, sublayer_inputs, training):
+        outputs = self.sublayer(*sublayer_inputs)
+        outputs = self.dropout_layer(outputs, training=training)
+        return self.layer_norm(x + outputs)
 ```
 </div>
 </div>
@@ -110,16 +115,21 @@ Hint: it might be helpful to use pass in the input as a `QueryKeyValue` data str
 <div markdown="1">
 ```python
 class EncoderBlock(tf.keras.models.Model):
-                        def __init__(self, dim, ff_dim, num_heads, dropout):
-                            super(EncoderBlock, self).__init__()
-                            self.attn_block = ResidualBlock(MultiHeadAttention(dim, num_heads, dropout))
-                            self.ff_block = ResidualBlock(FeedForward(hidden_dim=ff_dim,
-                                                                    output_dim=dim))
-                    
-                        def __call__(self, x, pos, mask):
-                            out = self.attn_block(x.query, [x, pos, mask])
-                            out = self.ff_block(out)
-                            return out
+    def __init__(self, dim, ff_dim, num_heads, dropout=0.0):
+        super(EncoderBlock, self).__init__()
+        self.attn_block = ResidualBlock(
+            MultiHeadAttention(dim, num_heads),
+            dropout=dropout
+        )
+        self.ff_block = ResidualBlock(
+            FeedForward(hidden_dim=ff_dim, output_dim=dim),
+            dropout=dropout
+        )
+
+    def __call__(self, x, mask, training):
+        out = self.attn_block(x.query, [x, mask], training=training)
+        out = self.ff_block(out, [out], training=training)
+        return out
 ```
 </div>
 </div>
@@ -129,19 +139,19 @@ Finally we can put together the `Encoder`, which consists of a stack of N encode
 <div markdown="1" class="collapse-Encoder">
 ```python
 class Encoder(tf.keras.models.Model):
-                    def __init__(self, dim, ff_dim, num_heads, dropout, num_blocks):
-                        super(Encoder, self).__init__()
-                        self.blocks = [
-                            EncoderBlock(dim, ff_dim, num_heads, dropout)
-                            for _ in range(num_blocks)
-                        ]
+    def __init__(self, dim, ff_dim, num_heads, num_blocks, dropout=0.0):
+        super(Encoder, self).__init__()
+        self.blocks = [
+            EncoderBlock(dim, ff_dim, num_heads, dropout=dropout)
+            for _ in range(num_blocks)
+        ]
 
-                    def __call__(self, x, pos, mask):
-                        inputs = x
-                        for block in self.blocks:
-                            x = block(inputs, pos, mask)
-                            inputs = QueryKeyValue(x)
-                        return x
+    def __call__(self, x, mask, training):
+        inputs = QueryKeyValue(x)
+        for block in self.blocks:
+            x = block(inputs, mask, training=training)
+            inputs = QueryKeyValue(x)
+        return x
 ```
 </div>
 
@@ -159,23 +169,25 @@ Hint: it will be very similar to `EncoderBlock` but remember that the inputs to 
 <div markdown="1">
 ```python
 class DecoderBlock(tf.keras.models.Model):
-    def __init__(self, dim, ff_dim, num_heads, dropout, skip_attn=False):
+    def __init__(self, dim, ff_dim, num_heads, dropout=0.0,
+                 skip_attn=False):
         super(DecoderBlock, self).__init__()
         self.skip_attn = skip_attn
         if not skip_attn:
             self.self_attn_block = ResidualBlock(
-                MultiHeadAttention(dim, num_heads, dropout)
+                MultiHeadAttention(dim, num_heads),
+                dropout=dropout
             )
-        self.memory_block = EncoderBlock(dim, ff_dim, num_heads, dropout)
+        self.memory_block = EncoderBlock(dim, ff_dim, num_heads, dropout=dropout)
 
-    def __call__(self, x, pos, decoder_mask, memory_mask):
+    def __call__(self, x, decoder_mask, memory_mask, training):
         if not self.skip_attn:
             y = self.self_attn_block(x.query,
-                                    [QueryKeyValue(x.query),
-                                    QueryKeyValue(pos.query),
-                                    decoder_mask])
+                                     [QueryKeyValue(x.query),
+                                      decoder_mask],
+                                     training=training)
             x = QueryKeyValue(y, x.key, x.value)
-        out = self.memory_block(x, pos, memory_mask)
+        out = self.memory_block(x, memory_mask, training=training)
         return out
 ```
 </div>
@@ -187,22 +199,24 @@ The decoder network will be very similar to the encoder except that it will rece
 <div markdown="1">
 ```python
 class Decoder(tf.keras.models.Model):
-    def __init__(self, dim, ff_dim, num_heads, dropout, num_blocks,
-                skip_first_attn=False):
+    def __init__(self, dim, ff_dim, num_heads, num_blocks, dropout=0.0,
+                 skip_first_attn=False):
         super(Decoder, self).__init__()
         self.blocks = [
-            DecoderBlock(dim, ff_dim, num_heads, dropout,
-                        skip_attn=(i == 0) and skip_first_attn)
+            DecoderBlock(dim, ff_dim, num_heads, dropout=dropout,
+                         skip_attn=(i == 0) and skip_first_attn)
             for i in range(num_blocks)
         ]
 
-    def __call__(self, x, decoder_mask, memory_mask, return_all=False):
-        outputs = [x.query]
+    def __call__(self, x, memory, decoder_mask, memory_mask,
+                 training,
+                 return_all=False):
+        outputs = [x]
         for block in self.blocks:
-            # TODO: is this the right approach?
             outputs.append(
-                block(QueryKeyValue(outputs[-1], x.key, x.value),
-                    pos, decoder_mask, memory_mask)
+                block(QueryKeyValue(outputs[-1], memory),
+                      decoder_mask, memory_mask,
+                      training=training)
             )
         if return_all:
             return outputs
