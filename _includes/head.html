@@ -9,111 +9,12 @@
   {%- seo -%}
   <script src="//code.jquery.com/jquery-1.12.4.js"></script>
   <script src="//code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
-  <style>
-    
-    button[class^=collapse], button#toggle-active{
-    color: #fff;
-    background-color: #007bff;
-    border-color: #007bff;
-    border: 1px solid transparent;
-    display: inline-block;
-    font-weight: 400;
-    text-align: center;
-    vertical-align: middle;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    user-select: none;
-    padding: .375rem .75rem;
-    font-size: 1rem;
-    line-height: 1.5;
-    border-radius: .25rem;
-    transition: color .15s ease-in-out,background-color .15s ease-in-out,border-color .15s ease-in-out,box-shadow .15s ease-in-out;
-    }
-    button#toggle-active{
-      right:0;
-      position: fixed;
-      border-radius: 0;
-      background-color: #458;
-      border-color:#458;
-      top: -2px;
-      border: none;
-      opacity: 70%;
-      display: none;
-      transition: color .15s ease-in-out,background-color .15s ease-in-out,border-color .15s ease-in-out,box-shadow .15s ease-in-out;
-    }
-
-    /* @media screen and (min-width: 600px) {
-      button#toggle-active{
-      right:0;
-      }
-    } */
-    button#toggle-active:hover{
-      opacity: 90%;
-    }
-    div[class^=collapse]{
-      display: none;
-      margin-bottom: 0.25rem;
-    }
-      div[class^=collapse] ul{
-        margin-bottom: 0;
-      }
-      div[class^=collapse] .textblock{
-        border-radius: .25rem;
-        
-        background-color:#418ef31c;
-        padding: .75rem;
-      }
-    
-  </style>
-   <script>
-    window.onload = function(){
-      $("div[class^=collapse]").each(
-        function(i, elem){
-          var p = document.createElement('p');
-          var btn = document.createElement('button');
-          btn.className = elem.className;
-          btn.innerText = "Show/Hide";
-          btn.onclick = () => {$('div.' + elem.className).toggle();};
-          p.appendChild(btn)
-          elem.parentNode.insertBefore(p, elem);
-        }
-      )
-      $('#toggle-active').click(function(){
-        if (this.className == 'active'){
-          this.className = 'inactive';
-          $("div[class^=collapse]").each(
-            (idx, i)=>{i.style.display = 'block'});
-          $("button[class^=collapse]").each(
-            (idx, i)=>{i.style.display = 'none'});
-        }
-        else{
-          this.className = 'active';
-          $("div[class^=collapse]").each(
-            (idx, i)=>{i.style.display = 'none'});
-          $("button[class^=collapse]").each(
-            (idx, i)=>{i.style.display = 'block'});
-        }
-      })
-
-      var resizeBtn = function(){
-        if ($(window).scrollTop() >= 50) { 
-          $("#toggle-active").css({"display":"block"})
-        }
-        else{
-          $("#toggle-active").css({"display":"none"})
-          // $("#toggle-active").css({
-          //   "right":(window.matchMedia("(min-width: 600px)").matches)?"0px":"70px",
-          //  "top":"-2px"})
-        }
-      }
-      
-      $(window).on('scroll', resizeBtn);
-
-      //window.matchMedia("(min-width: 600px)").addListener(resizeBtn);
-
-    }
-  </script>
+  <script src='{{ "/assets/shared/collapse/collapse.js" | relative_url }}'></script>
+  <script src='{{ "/assets/shared/slider/slider.js" | relative_url }}'></script>
+  <link rel="stylesheet" href='{{ "/assets/shared/collapse/collapse.css" | relative_url }}'>
+  <link rel="stylesheet" href='{{ "/assets/shared/slider/slider.css" | relative_url }}'>
+  <style></style>
+  
  
   <link rel="stylesheet" href="{{ "/assets/main.css" | relative_url }}">
   <style>
@@ -148,9 +49,10 @@
   });
 </script>
 <script src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML" type="text/javascript"></script>
-
   {%- feed_meta -%}
   {%- if jekyll.environment == 'production' and site.google_analytics -%}
     {%- include google-analytics.html -%}
   {%- endif -%}
+
+  {%- include slider.html -%}
 </head>

@@ -4,18 +4,86 @@ title:  "Another Annotated Transformer"
 date:   2020-08-04 19:52:13 +0100
 categories: jekyll update
 ---
+# Positional Encoding
+
+# Masking
+Two kinds of masks are used to prevent information flow from some sequence positions. The first, which is not specific to the Transformer and is not discussed in the paper but used in practice, is to mask all the positions that have a padding symbol. Typically sequences of varying lengths are padded in order to be able to input them in a batch but we don't want the model to use the values after the end of a sequence.
+
+Implement a `PadMask` class that does the following:
+- Given an integer pad symbol or set of such symbols, produces a boolean tensor where
+  which is `False` at a location if the value is any of the pad symbols otherwise `True`
+- Returns a `(batch_size, 1, 1, sequence_length)` tensor that is suitable for using  in `scaled_dot_product_attention`
+
+
+
+> We also modify the self-attention sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This masking, combined with fact that the output embeddings are offset by one position, ensures that the predictions for position $i$ can depend only on the known outputs at positions less than $i$.
+
+## Attention 
+
+> An attention function can be described as mapping a query and a set of key-value pairs to an output, where the query, keys, values, and output are all vectors. The output is computed as a weighted sum of the values, where the weight assigned to each value is computed by a compatibility function of the query with the corresponding key.
+
 # Scaled Dot-Product Attention
 
->We call our particular attention "Scaled Dot-Product Attention" (Figure 2). The input consists of queries and keys of dimension d , and values of dimension d . We compute the dot products of the
-k√v
-query with all keys, divide each by dk, and apply a softmax function to obtain the weights on the
+>We call our particular attention "Scaled Dot-Product Attention" (Figure 2). The input consists of queries and keys of dimension $d$ , and values of dimension $d$ . We compute the dot products of the
+query with all keys, divide each by $\sqrt{d_k}$, and apply a softmax function to obtain the weights on the
 values.
 
 >In practice, we compute the attention function on a set of queries simultaneously, packed together into a matrix Q. The keys and values are also packed together into matrices K and V . We compute the matrix of outputs as:
 
-It is helpful to consider the shapes of the inputs as they get transformed at each step.
+$$\text{Attention}(Q, K, V) = \text{softmax}\frac{QK^T}{\sqrt{d_k}} V$$
 
->We need to prevent leftward information flow in the decoder to preserve the auto-regressive property. We implement this inside of scaled dot-product attention by masking out (setting to −∞) all values in the input of the softmax which correspond to illegal connections.
+Let us implement the steps in the diagram, not worrying for now about the `Mask` step. Assume there are three inputs `query`, `key` and `value` with final two dimensions (`shape[-2:]`) `N_q, d_k`, `N_k, d_k`, `N_v, d_k`, where `N_k = N_v`.
+<div markdown="0" class="collapse-scaled_dot_product_attention">
+<div markdown="1">
+```python
+def scaled_dot_product_attention(query, key, value, inf=1e9):
+    d_k = tf.cast(tf.shape(query)[-1], tf.float32)
+    key_transpose = tf.transpose(key,
+    tf.concat([tf.shape(key)[:-2], [-1, -2]]))
+    qkt = tf.matmul(query, key_transpose)
+    alpha = tf.nn.softmax(qkt/tf.sqrt(d_k))
+    return tf.matmul(alpha, value)
+```
+</div>
+</div>
+
+# Multi-Head Attention
+
+>Instead of performing a single attention function with $d_\text{model}$-dimensional keys, values and queries, we found it beneficial to linearly project the queries, keys and values h times with different, learned linear projections to $d_k$, $d_k$ and $d_v$ dimensions, respectively. On each of these projected versions of queries, keys and values we then perform the attention function in parallel, yielding $d_v$ -dimensional output values. These are concatenated and once again projected, resulting in the final values
+
+
+> In this work we employ h = 8 parallel attention layers, or heads. For each of these we use dk = dv = dmodel/h = 64. Due to the reduced dimension of each head, the total computational cost is similar to that of single-head attention with full dimensionality.
+
+We can apply `scaled_dot_product_attention` in parallel across heads, batches and postitions. It can be helpful to track the shapes of the inputs as they get transformed via Multi-Head Attention.
+
+<div class='slideshow-container'></div>
+<script>
+    let img = ([1, 2, 3, 4, 5]).map((i)=>{return 'shape' + i + '.jpg';});
+    let captions = [
+        'Linear transform to get query, key and value inputs for attention',
+        'Split into heads along feature dimension', 
+        'Transpose key and matrix multiply with query', 
+        'Apply masked softmax to get attention weights and multiply with value', 
+        'Merge heads along feature dimension and apply output transform'
+        ];
+    makeSlider(
+        document.querySelector('.slideshow-container'),
+        captions,
+        img,
+        'Transformer'
+    )
+
+</script>
+
+Now we can implement a `MultiHeadAttention` module which will apply these steps.
+
+
+>We need to prevent leftward information flow in the decoder to preserve the auto-regressive property. We implement this inside of scaled dot-product attention by masking out (setting to $-\infty$) all values in the input of the softmax which correspond to illegal connections.
+
+
+
+
+We will learn more about masks in a moment. For now assume that there is a `mask` boolean tensor where `True` means use that value at the location and `False` means mask out this value. 
 
 One way to handle masking is to set the positions where `mask=False` to a negative value with large magnitude such that its softmax score is almost zero and has negligible effect on the scores of the values where `mask=True`.
 
@@ -38,8 +106,9 @@ def scaled_dot_product_attention(x, mask, inf=1e9):
 </div>
 </div>
 
-# Masking
-> We also modify the self-attention sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This masking, combined with fact that the output embeddings are offset by one position, ensures that the predictions for position $i$ can depend only on the known outputs at positions less than $i$.
+
+
+
 
 # Position-wise Feed-Forward Networks
 
