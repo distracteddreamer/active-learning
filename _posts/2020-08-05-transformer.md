@@ -1,22 +1,27 @@
 ---
 layout: post
-title:  "Another Annotated Transformer"
+title:  "The Annotaited Transformer Part 1: Build"
 date:   2020-08-04 19:52:13 +0100
 categories: jekyll update
 ---
-# Positional Encoding
+## Introduction
+![Part of the first page of 'Attention Is All You Need' showing the title and abstract]({{site.baseurl}}/assets/Transformer/abs.png)
 
-# Masking
-Two kinds of masks are used to prevent information flow from some sequence positions. The first, which is not specific to the Transformer and is not discussed in the paper but used in practice, is to mask all the positions that have a padding symbol. Typically sequences of varying lengths are padded in order to be able to input them in a batch but we don't want the model to use the values after the end of a sequence.
+Since its introduction in [Attention Is All You Need](https://arxiv.org/abs/1706.03762) [1], the Transformer architecture has become very influential and has had successes in many tasks not just in NLP but in other areas like vision. This tutorial is inspired by the approach in [The Annotated Transformer](http://nlp.seas.harvard.edu/2018/04/03/attention.html) [2] which primarily uses text directly quoted from the paper to explain the code (or you could say that it uses code to explain the paper). Differently from [[2]](http://nlp.seas.harvard.edu/2018/04/03/attention.html), which uses PyTorch and adopts a top-down approach to building the model, this tutorial uses Tensorflow along with bottom up approach starting with individual components and gradually putting them together. All quoted sections are from [[1]](https://arxiv.org/abs/1706.03762). 
 
-Implement a `PadMask` class that does the following:
-- Given an integer pad symbol or set of such symbols, produces a boolean tensor where
-  which is `False` at a location if the value is any of the pad symbols otherwise `True`
-- Returns a `(batch_size, 1, 1, sequence_length)` tensor that is suitable for using  in `scaled_dot_product_attention`
+## Motivation
+> Attention mechanisms have become an integral part of compelling sequence modeling and transduction models in various tasks, allowing modeling of dependencies without regard to their distance in the input or output sequences [2, 19]. In all but a few cases [27], however, such attention mechanisms are used in conjunction with a recurrent network.
 
+> In this work we propose the Transformer, a model architecture eschewing recurrence and instead relying entirely on an attention mechanism to draw global dependencies between input and output.
 
+## Architecture
 
-> We also modify the self-attention sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This masking, combined with fact that the output embeddings are offset by one position, ensures that the predictions for position $i$ can depend only on the known outputs at positions less than $i$.
+![Diagram of the Transformer architecture]({{site.baseurl}}/assets/Transformer/arch.png)
+
+**Figure 1 of [[1]](https://arxiv.org/abs/1706.03762))**
+
+> Most competitive neural sequence transduction models have an encoder-decoder structure [5, 2, 35]. Here, the encoder maps an input sequence of symbol representations $(x_1,...,x_n)$ to a sequence of continuous representations $z = (z_1,...,z_n)$. Given $z$, the decoder then generates an output sequence $(y_1, ..., y_m)$ of symbols one element at a time. At each step the model is auto-regressive [10], consuming the previously generated symbols as additional input when generating the next.
+
 
 ## Attention 
 
@@ -29,20 +34,24 @@ query with all keys, divide each by $\sqrt{d_k}$, and apply a softmax function t
 values.
 
 >In practice, we compute the attention function on a set of queries simultaneously, packed together into a matrix Q. The keys and values are also packed together into matrices K and V . We compute the matrix of outputs as:
+>
+> $$\text{Attention}(Q, K, V) = \text{softmax}\frac{QK^T}{\sqrt{d_k}} V$$
 
-$$\text{Attention}(Q, K, V) = \text{softmax}\frac{QK^T}{\sqrt{d_k}} V$$
+![Diagram illustrating the steps of scaled dot product attention described in the text]({{site.baseurl}}/assets/Transformer/dot_prod_attn.png)
 
-Let us implement the steps in the diagram, not worrying for now about the `Mask` step. Assume there are three inputs `query`, `key` and `value` with final two dimensions (`shape[-2:]`) `N_q, d_k`, `N_k, d_k`, `N_v, d_k`, where `N_k = N_v`.
-<div markdown="0" class="collapse-scaled_dot_product_attention">
+**From Figure 2 of [[1]](https://arxiv.org/abs/1706.03762))**
+
+Let us implement the steps in the diagram, not worrying for now about the `Mask` step. We will call this function `scaled_dot_product_attention_temp`. Assume there are three inputs `query`, `key` and `value` with final two dimensions (`shape[-2:]`) `N_q, d_k`, `N_k, d_k`, `N_v, d_k`, where `N_k = N_v`. Return the final output as well as the attention weights as these are useful for inspecting the model.
+<div markdown="0" class="collapse-scaled_dot_product_attention_temp">
 <div markdown="1">
 ```python
-def scaled_dot_product_attention(query, key, value, inf=1e9):
+def scaled_dot_product_attention_temp(query, key, value, inf=1e9):
     d_k = tf.cast(tf.shape(query)[-1], tf.float32)
     key_transpose = tf.transpose(key,
     tf.concat([tf.shape(key)[:-2], [-1, -2]]))
     qkt = tf.matmul(query, key_transpose)
     alpha = tf.nn.softmax(qkt/tf.sqrt(d_k))
-    return tf.matmul(alpha, value)
+    return tf.matmul(alpha, value), alpha
 ```
 </div>
 </div>
@@ -51,8 +60,7 @@ def scaled_dot_product_attention(query, key, value, inf=1e9):
 
 >Instead of performing a single attention function with $d_\text{model}$-dimensional keys, values and queries, we found it beneficial to linearly project the queries, keys and values h times with different, learned linear projections to $d_k$, $d_k$ and $d_v$ dimensions, respectively. On each of these projected versions of queries, keys and values we then perform the attention function in parallel, yielding $d_v$ -dimensional output values. These are concatenated and once again projected, resulting in the final values
 
-
-> In this work we employ h = 8 parallel attention layers, or heads. For each of these we use dk = dv = dmodel/h = 64. Due to the reduced dimension of each head, the total computational cost is similar to that of single-head attention with full dimensionality.
+>In this work we employ h = 8 parallel attention layers, or heads. For each of these we use dk = dv = dmodel/h = 64. Due to the reduced dimension of each head, the total computational cost is similar to that of single-head attention with full dimensionality.
 
 We can apply `scaled_dot_product_attention` in parallel across heads, batches and postitions. It can be helpful to track the shapes of the inputs as they get transformed via Multi-Head Attention.
 
@@ -75,42 +83,54 @@ We can apply `scaled_dot_product_attention` in parallel across heads, batches an
 
 </script>
 
-Now we can implement a `MultiHeadAttention` module which will apply these steps.
+Now we can implement a `MultiHeadAttention` module which will apply these steps. It will be called on four inputs `query, key, value, mask` and return a single output.
 
-
->We need to prevent leftward information flow in the decoder to preserve the auto-regressive property. We implement this inside of scaled dot-product attention by masking out (setting to $-\infty$) all values in the input of the softmax which correspond to illegal connections.
-
-
-
-
-We will learn more about masks in a moment. For now assume that there is a `mask` boolean tensor where `True` means use that value at the location and `False` means mask out this value. 
-
-One way to handle masking is to set the positions where `mask=False` to a negative value with large magnitude such that its softmax score is almost zero and has negligible effect on the scores of the values where `mask=True`.
-
-<div markdown="0" class="collapse-scaled_dot_product_attention">
+<div markdown="0" class="collapse-MultiHeadAttention">
 <div markdown="1">
 ```python
-def scaled_dot_product_attention(x, mask, inf=1e9):
-    # x: (query=(B, H, N_q, d), key=(B, H, N_kv, d), value=(B, H, N_kv, d))
-    # mask: (B, 1, N_q, N_kv) or (B, 1, 1, N_kv)
-    dim = tf.cast(tf.shape(x.query)[-1], tf.float32)
-    # (B, H, N_q, N_kv)
-    # The einsum here is the same as QK^T
-    alpha_term = tf.einsum('bhqd,bhkd->bhqk', x.query, x.key) / tf.sqrt(dim)
-    # (B, H, N_q, N_kv)
-    alpha_term = tf.where(mask, alpha_term, -inf)
-    alpha = tf.nn.softmax(alpha_term)
-    # (B, H, N_q, N_kv) @ (B, H, N_kv, d') -> (B, H, N_q, d')
-    return alpha @ x.value
+class MultiHeadAttention(tf.keras.models.Model):
+    def __init__(self, dim, num_heads):
+        super(MultiHeadAttention, self).__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.transform_query, self.transform_key, self.transform_value = [
+            *(tf.keras.layers.Dense(units=dim) for _ in range(3))
+        ]
+        self.transform_out = tf.keras.layers.Dense(units=dim)
+
+    def split_heads(self, x):
+        # x: (B, N, d)
+        # (B, N, h, d//h)
+        x = tf.reshape(x, (tf.shape(x)[0], -1, self.num_heads, self.dim // self.num_heads))
+        # (B, h, N, d//h)
+        x = tf.transpose(x, (0, 2, 1, 3))
+        return x
+
+    def merge_heads(self, x):
+        # x: (B, h, N, d//h)
+        # (B, N, h, d//h)
+        x = tf.transpose(x, (0, 2, 1, 3))
+        # (B, N, d)
+        x = tf.reshape(x, (tf.shape(x)[0], -1, self.dim))
+        return x
+
+    def __call__(self, query, key, value, mask):
+        # (query=(B, N_q, d), key=(B, N_k, d), value=(B, N_v, d))
+        query = self.transform_query(query)
+        key = self.transform_key(key)
+        value = self.transform_value(value)
+        # (query=(B, h, N_q, d//h), key=(B, h, N_k, d//h), value=(B, h, N_v, d//h))
+        query, key, value = (self.split_heads(i) for i in [query, key, value])
+        # (B, h, N_q, d)
+        x, attn = scaled_dot_product_attention(query, key, value, mask)
+        x = self.merge_heads(x)
+        x = self.transform_out(x)
+        return x, attn
 ```
 </div>
 </div>
 
-
-
-
-
-# Position-wise Feed-Forward Networks
+## Position-wise Feed-Forward Networks
 
 >[E]ach of the layers in our encoder and decoder contains a fully connected feed-forward network, which is applied to each position separately and identically. This consists of two linear transformations with a ReLU activation in between.
 FFN(x) = max(0, xW1 + b1 )W2 + b2 (2)
@@ -138,13 +158,13 @@ class FeedForward(tf.keras.models.Model):
         self.dense2 = tf.keras.layers.Dense(output_dim)
 
     def __call__(self, x):
-        x = self.dense2(self.dense1(x))=
+        x = self.dense2(self.dense1(x))
         return x
 ```
 </div>
 </div>
 
-# Encoder
+## Encoder
 > The encoder is composed of a stack of N = 6 identical layers. Each layer has two sub-layers. The first is a multi-head self-attention mechanism, and the second is a simple, position- wise fully connected feed-forward network. We employ a residual connection [11] around each of the two sub-layers, followed by layer normalization [1]. That is, the output of each sub-layer is LayerNorm(x + Sublayer(x)), where Sublayer(x) is the function implemented by the sub-layer itself. To facilitate these residual connections, all sub-layers in the model, as well as the embedding layers, produce outputs of dimension dmodel = 512.
 
 Let us start by building the Sublayer block shown below. One way to implement it is to implement a `ResidualBlock` module, in which the sublayer, Add & Norm and the residual connection are contained in a single block. Here sublayer is some arbitrary module passed in as input. This block will then be used in the `FeedForward` and  `MultiHeadedAttention` blocks. These are the key details:
@@ -165,8 +185,8 @@ class ResidualBlock(tf.keras.models.Model):
         self.dropout_layer = get_dropout_layer(dropout)
         self.layer_norm = tf.keras.layers.LayerNormalization()
 
-    def __call__(self, x, sublayer_inputs, training):
-        outputs = self.sublayer(*sublayer_inputs)
+    def __call__(self, x, *additional_inputs, training=True):
+        outputs = self.sublayer(x, *additional_inputs)
         outputs = self.dropout_layer(outputs, training=training)
         return self.layer_norm(x + outputs)
 ```
@@ -195,10 +215,10 @@ class EncoderBlock(tf.keras.models.Model):
             dropout=dropout
         )
 
-    def __call__(self, x, mask, training):
-        out = self.attn_block(x.query, [x, mask], training=training)
-        out = self.ff_block(out, [out], training=training)
-        return out
+    def __call__(self, query, key, value, mask, training=True):
+        out, attn = self.attn_block(query, key, value, mask, training=training)
+        out = self.ff_block(out, training=training)
+        return out, attn
 ```
 </div>
 </div>
@@ -215,18 +235,19 @@ class Encoder(tf.keras.models.Model):
             for _ in range(num_blocks)
         ]
 
-    def __call__(self, x, mask, training):
-        inputs = QueryKeyValue(x)
+    def __call__(self, query, mask, training=True):
+        attn_weights = []
         for block in self.blocks:
-            x = block(inputs, mask, training=training)
-            inputs = QueryKeyValue(x)
-        return x
+            query, attn = block(query=query, key=query, value=query,
+                          mask=mask, training=training)
+            attn_weights.append(attn)
+        return query, attn_weights
 ```
 </div>
 
-# Decoder
+## Decoder
 
-> The decoder is also composed of a stack of N = 6 identical layers. In addition to the two sub-layers in each encoder layer, the decoder inserts a third sub-layer, which performs multi-head attention over the output of the encoder stack. Similar to the encoder, we employ residual connections around each of the sub-layers, followed by layer normalization. We also modify the self-attention sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This masking, combined with fact that the output embeddings are offset by one position, ensures that the predictions for position i can depend only on the known outputs at positions less than i.
+> The decoder is also composed of a stack of N = 6 identical layers. In addition to the two sub-layers in each encoder layer, the decoder inserts a third sub-layer, which performs multi-head attention over the output of the encoder stack. Similar to the encoder, we employ residual connections around each of the sub-layers, followed by layer normalization.
 
 Let us write a `DecoderBlock`. The decoder block consists of the following:
 - The two sublayers in the encoder block.
@@ -238,59 +259,460 @@ Hint: it will be very similar to `EncoderBlock` but remember that the inputs to 
 <div markdown="1">
 ```python
 class DecoderBlock(tf.keras.models.Model):
-    def __init__(self, dim, ff_dim, num_heads, dropout=0.0,
-                 skip_attn=False):
+    def __init__(self, dim, ff_dim, num_heads, dropout=0.0):
         super(DecoderBlock, self).__init__()
-        self.skip_attn = skip_attn
-        if not skip_attn:
-            self.self_attn_block = ResidualBlock(
-                MultiHeadAttention(dim, num_heads),
-                dropout=dropout
-            )
+        self.self_attn_block = ResidualBlock(
+            MultiHeadAttention(dim, num_heads),
+            dropout=dropout
+        )
         self.memory_block = EncoderBlock(dim, ff_dim, num_heads, dropout=dropout)
 
-    def __call__(self, x, decoder_mask, memory_mask, training):
-        if not self.skip_attn:
-            y = self.self_attn_block(x.query,
-                                     [QueryKeyValue(x.query),
-                                      decoder_mask],
-                                     training=training)
-            x = QueryKeyValue(y, x.key, x.value)
-        out = self.memory_block(x, memory_mask, training=training)
-        return out
+    def __call__(self, query, key, value, decoder_mask, memory_mask, training=True):
+        query, self_attn = self.self_attn_block(query, query, query, decoder_mask, training=training)
+        out, memmory_attn = self.memory_block(query, key, value, memory_mask, training=training)
+        return out, self_attn, memmory_attn
 ```
 </div>
 </div>
 
-The decoder network will be very similar to the encoder except that it will receive two different mask inputs, one for self-attention and the other for the encoder outputs. Since intermediate outputs are sometimes used to train auxiliary losses, considering adding the option to return all the outputs.  
+The decoder network will be very similar to the encoder except that it will receive two different mask inputs, one for self-attention and the other for the encoder outputs. 
 
 <div class="collapse-Decoder">
 <div markdown="1">
 ```python
 class Decoder(tf.keras.models.Model):
-    def __init__(self, dim, ff_dim, num_heads, num_blocks, dropout=0.0,
-                 skip_first_attn=False):
+    def __init__(self, dim, ff_dim, num_heads, num_blocks, dropout=0.0):
         super(Decoder, self).__init__()
         self.blocks = [
-            DecoderBlock(dim, ff_dim, num_heads, dropout=dropout,
-                         skip_attn=(i == 0) and skip_first_attn)
+            DecoderBlock(dim, ff_dim, num_heads, dropout=dropout)
             for i in range(num_blocks)
         ]
 
-    def __call__(self, x, memory, decoder_mask, memory_mask,
-                 training,
-                 return_all=False):
-        outputs = [x]
+    def __call__(self, query, memory, decoder_mask, memory_mask, training=True):
+        self_attn_weights = []
+        memory_attn_weights = []
         for block in self.blocks:
             outputs.append(
-                block(QueryKeyValue(outputs[-1], memory),
-                      decoder_mask, memory_mask,
+                query, self_attn, memory_attn = block(query=query, key=memory, value=memory,
+                      decoder_mask=decoder_mask,
+                      memory_mask=memory_mask,
                       training=training)
             )
-        if return_all:
-            return outputs
-        return [outputs[-1]]
+            self_attn_weights.append(self_attn)
+            memory_attn_weights.append(memory_attn)
+        return query
 ```
 </div>
 </div>
 
+## Masking
+Two kinds of masks are used to prevent information flow from some sequence positions. 
+
+You can plot the masks generated below after squeezing the dimensions of size 1, using the following code:
+
+```python
+def plot_mask(mask):
+    plt.pcolormesh(mask, cmap='gray', vmin=0, vmax=1, edgecolors='gray')
+    plt.gca().invert_yaxis()
+    plt.axis('off')
+```
+
+# Pad masking
+This type of masking is not specific to the Transformer and is not discussed in the paper but used in practice. Padding sequences to the same length allows us to batch together sequences of different lengths. However this is only an engineering requirement and we don't actually want the model to use the padding elements. The solution is to mask all the positions that have a padding symbol. 
+
+Implement a `SequenceMask` class that does the following:
+- Given an integer pad symbol or set of such symbols, produces a boolean tensor where
+  which is `False` at a location if the value is any of the pad symbols otherwise `True`
+- Returns a `(batch_size, 1, 1, sequence_length)` tensor that is suitable for using  in `scaled_dot_product_attention`
+- When applied to a query of length $N_q$ and key of length $N_k$ this is equivalent to a $N_q \times N_k$ sequence-specific mask for each batch element but shared by all the attention heads, as shown in the figure below:
+
+![Figure representing a batch_size x num_heads block of N_q x N_k pad masks]({{site.baseurl}}/assets/Transformer/mask_p.jpg)
+
+<div class="collapse-SequenceMask">
+<div markdown="1">
+```python
+class SequenceMask:
+    def __init__(self, pad):
+        self.pad = pad
+
+    def __call__(self, x):
+        # Disregards padded elements
+        # x: (B, N)
+        if isinstance(self.pad, int):
+            mask = tf.not_equal(x, self.pad)
+        else:
+            mask = tf.reduce_all(tf.not_equal(x[..., None], self.pad), axis=-1)
+        # Same mask for every position
+        # (B, 1, 1, N)
+        return mask[:, None, None]
+```
+</div>
+</div>
+
+The sequence masks for `tf.stack([[1, 2, 3, 4, 5, 0, 0], [1, 2, 0, 0, 0, 0, 0], [1, 2, 3, 4, 5, 6, 7]])` and `pad=0`:
+
+<p style="text-align:center">
+    <img alt="Figure showing pad masks for the inputs given in the text" src="{{site.baseurl}}/assets/Transformer/seq_mask.png">
+</p>
+
+# Target masking
+Since we train all the target positions in parallel, the model has access to elements from the "future" and we need to prevent information flowing from later to earlier positions.
+
+> We also modify the self-attention sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This masking, combined with fact that the output embeddings are offset by one position, ensures that the predictions for position $i$ can depend only on the known outputs at positions less than $i$.
+
+Implement a `subsequent_mask` function that for `sequence_length=N` returns an $N \times N$ tensor, `mask` where, `mask[i, j] = i <=j`
+
+This will be used for self-attention only and when applied to a query of length $N$ will broadcast to a $N \times N$ sequence-agnostic mask shared across all the batch elements and attention heads, as shown below:
+
+![Figure representing a batch_size x num_heads block of N_q x N_q target masks]({{site.baseurl}}/assets/Transformer/mask_f.jpg)
+
+Hint: use `tf.linalg.band_part`.
+
+<div class="collapse-subsequent_mask">
+<div markdown="1">
+```python
+def subsequent_mask(seq_length):
+    # (N, N)
+    # lower_triangular matrix
+    future_mask = tf.linalg.band_part(
+        tf.ones((seq_length, seq_length)),
+        -1, 0)
+    future_mask = tf.cast(future_mask, tf.bool)
+    return future_mask
+```
+</div>
+</div>
+
+The result for `subsequent_mask(7)`:
+<p style="text-align:center;">
+<img alt="Figure showing subsequent_mask(7)"
+src="{{site.baseurl}}/assets/Transformer/subsequent_mask.png">
+</p>
+
+
+Now write a `TargetMask` class that inherits from `SequenceMask` does the following when called:
+- Creates a future mask for the input sequence 
+- Creates a sequence mask for the input
+- Combines these so that `combined_mask[:, j] = False` if position `j` is padding else `combined_mask[:, j] = future_mask[i, j]`
+- Returns a `(batch_size, 1, sequence_length, sequence_length)` tensor that is suitable for using in `scaled_dot_product_attention`
+
+<div class="collapse-subsequent_mask">
+<div markdown="1">
+```python
+class TargetMask(SequenceMask):
+    def __call__(self, x):
+        # Disregards "future" elements and any others
+        # which are padded
+        # x: (B, N)
+        # (B, 1, N)
+        pad_mask = super().__call__(x)
+        seq_length = tf.shape(x)[-1]
+        # Mask shared for same position across batches
+        # (N, N)
+        future_mask = subsequent_mask(seq_length)
+        # (B, 1, 1, N) & (N, N) -> (B, 1, N, N)
+        mask = tf.logical_and(pad_mask, future_mask)
+        return mask
+```
+</div>
+</div>
+
+The target masks for `tf.stack([[1, 2, 3, 4, 5, 0, 0], [1, 2, 0, 0, 0, 0, 0], [1, 2, 3, 4, 5, 6, 7]])` and `pad=0`:
+
+<p style="text-align:center">
+    <img alt="Figure showing target masks for the inputs given in the text" src="{{site.baseurl}}/assets/Transformer/tar_mask.png">
+</p>
+
+# Masked attention
+In attention layers, the attention weights should be 0 for the padding elements so that other elements don't attend to these elements. 
+
+>We need to prevent leftward information flow in the decoder to preserve the auto-regressive property. We implement this inside of scaled dot-product attention by masking out (setting to $-\infty$) all values in the input of the softmax which correspond to illegal connections.
+
+One way to handle masking is to set the positions where `mask=False` to a negative value with large magnitude such that its softmax score is almost zero and has negligible effect on the scores of the values where `mask=True`.
+
+<div markdown="0" class="collapse-scaled_dot_product_attention">
+<div markdown="1">
+```python
+def scaled_dot_product_attention(query, key, value, mask, inf=1e9):
+    # x: (query=(B, H, N_q, d), key=(B, H, N_kv, d), value=(B, H, N_kv, d))
+    # mask: (B, 1, N_q, N_kv) or (B, 1, 1, N_kv)
+    dim = tf.cast(tf.shape(query)[-1], tf.float32)
+    # (B, H, N_q, N_kv)
+    alpha_term = tf.matmul(query, key, transpose_b=True) / tf.sqrt(dim)
+    # (B, H, N_q, N_kv)
+    alpha_term = tf.where(mask, alpha_term, -inf)
+    alpha = tf.nn.softmax(alpha_term)
+    # (B, H, N_q, N_kv) x (B, H, N_kv, d') -> (B, H, N_q, d')
+    return tf.matmul(alpha, value)
+```
+</div>
+</div>
+
+## Inputs and Outputs
+> [W]e use learned embeddings to convert the input tokens and output tokens to vectors of dimension $d_\text{model}$. We also use the usual learned linear transformation and softmax function to convert the decoder output to predicted next-token probabilities. In our model, we share the same weight matrix between the two embedding layers and the pre-softmax linear transformation, similar to [30]. In the embedding layers, we multiply those weights by $\sqrt{d_\text{model}}$
+
+A simple approach to share the weights is to implement an `ScaledEmbedding` layer using `tf.keras`, then get the weight from this layer and matrix multiply to generate the input to the softmax. Alternatively we can skip weight sharing and just use a dense layer for the output.
+
+Accordingly let implement us implement a `ScaledEmbedding` that takes as input a `num_tokens` length vector. 
+
+Hint: you can multiply the output by $\sqrt{d_\text{model}}$ instead of the weights. 
+
+<div class="collapse-PositionalEncoding" markdown="0">
+<div markdown="1">
+```python
+class ScaledEmbedding(tf.keras.layers.Layer):
+    def __init__(self, num_tokens, dim):
+        super(ScaledEmbedding, self).__init__()
+        self.embed = tf.keras.layers.Embedding(
+                input_dim=num_tokens,
+                output_dim=dim
+        )
+        self.dim = tf.cast(dim, tf.float32)
+
+    def __call__(self, x):
+        return tf.sqrt(self.dim) * self.embed(x)
+```
+</div>
+</div>
+
+If we want to share weights, we can do as follows:
+
+```python
+tf.matmul(x, embed_layer.weights[0], transpose_b=True)
+```
+
+## Positional Encoding
+> Since our model contains no recurrence and no convolution, in order for the model to make use of the order of the sequence, we must inject some information about the relative or absolute position of the tokens in the sequence. To this end, we add "positional encodings" to the input embeddings at the bottoms of the encoder and decoder stacks. The positional encodings have the same dimension dmodel as the embeddings, so that the two can be summed. 
+
+> In this work, we use sine and cosine functions of different frequencies:
+>
+>$$PE_{(\text{pos},2i)} = \sin(\text{pos}/10000^{2i/d_\text{model}})$$
+>
+>$$PE_{(\text{pos},2i+1)} = \cos(\text{pos}/10000^{2i/d_\text{model}})$$
+
+where $\text{pos}$ is the position and $i$ is the dimension. 
+
+> [W]e apply dropout to the sums of the embeddings and the positional encodings in both the encoder and decoder stacks
+
+Let us implement a `PostionalEncoding` layer as follows:
+- Receives as input a batch of embeddings size $(B, N, d_\text{model})$ 
+- Generates the positional encoding according to the equations above
+- Adds these to the input and applies dropout to the result
+
+<div class="collapse-PositionalEncoding" markdown="0">
+<div markdown="1">
+```python
+class PositionalEncoding(tf.keras.models.Model):
+    def __init__(self, dim, dropout=0.0):
+        super(PositionalEncoding, self).__init__()
+        # (D / 2,)
+        self.range = tf.range(0, dim, 2)
+        self.dim = tf.cast( 1 / (10000 ** (self.range / dim)), tf.float32)
+        self.dropout_layer = get_dropout_layer(dropout)
+
+    def __call__(self, x, training=True):
+        # x: (B, N, D)
+        # (N,)
+        length = x.shape[-2]
+        pos = tf.cast(tf.range(length), tf.float32)
+        # (1, N) / (D / 2, 1) -> (D / 2, N)
+        inp = pos[None] * self.dim[:, None]
+        sine = tf.sin(inp)
+        cos = tf.cos(inp)
+        # (D, N)
+        enc = tf.dynamic_stitch(
+            indices=[self.range, self.range + 1],
+            data=[sine, cos]
+        )
+        # (N, D)
+        enc = tf.transpose(enc, (1, 0))[None]
+        return self.dropout_layer(x + enc, training=training)
+```
+</div>
+</div>
+
+To get a positional encoding of shape `[length, dim]` that you can plot, call `PositionalEncoding(dim)(tf.zeros((1, length, dim))).numpy().squeeze()`. (With a zeros input and zero dropout just the positional encoding is returned).
+
+Here we can see for a few positions how for each dimension, the positional encoding tends to vary at each position helping to differentiate between the positions
+<div class="collapse-PositionalEncoding_plot" markdown="0">
+<div markdown="1">
+```python
+plt.figure(figsize=(12, 8))
+d_model = 32
+length = 128
+pe = PositionalEncoding(d_model)(tf.zeros([1, 128, d_model])).numpy().squeeze()
+plt.plot(np.arange(length), pe[:, 8:16]);
+```
+</div>
+</div>
+
+
+In the plots below we plot the positional encodings as:
+
+**`d_model`, `length`-sized vectors, showing how at each dimension the value at each position varies**
+
+Here we see the sinusoids for a few positions:
+
+<div class="collapse-pe_few" markdown="0">
+<div markdown="1">
+```python
+fig = plt.figure(figsize=(12, 8))
+d_model = 16
+length = 128
+pe = PositionalEncoding(d_model)(tf.zeros([1, 128, d_model])).numpy().squeeze()
+plt.plot(np.arange(length), pe[:, 4:8]);
+plt.legend(["dim %d"%p for p in range(4, 8)])
+plt.xlabel('position')
+plt.ylabel('dimension')
+```
+</div>
+</div>
+
+![plot showing sinusoids for positions 4-8 with length=128 and d_model=16]({{site.baseurl}}/assets/Transformer/pe_few.png)
+
+In this figure all the positions are plotted
+
+<div class="collapse-pe_dim_all" markdown="0">
+<div markdown="1">
+```python
+fig = plt.figure(figsize=(12, 6))
+d_model = 16
+length = 128
+pe = PositionalEncoding(d_model)(tf.zeros([1, length, d_model])).numpy().squeeze()
+# add an offset to so that 
+offset = 4 * np.arange(d_model) 
+# plot with orientation consistent with the [length, d_model] shape of the inputs
+plt.plot((pe + offset), np.arange(length));
+plt.xticks(offset);
+fig.axes[0].set_xticklabels(offset // 4);
+plt.xlabel('dimension')
+plt.ylabel('position')
+plt.legend(["dim %d"%p for p in range(length)], loc='upper right')
+```
+</div>
+</div>
+
+![plot showing sinusoids for all positions with length=128 and d_model=16]({{site.baseurl}}/assets/Transformer/pe_dim_all.png)
+
+2/ `length`, `d_model`-sized vectors, which lets us see how each position can be represented as a different sinusoid
+
+
+<div class="collapse-pe_length_all" markdown="0">
+<div markdown="1">
+```python
+fig = plt.figure(figsize=(12, 8))
+d_model = 128
+length = 16
+pe = PositionalEncoding(d_model)(tf.zeros([1, length, d_model])).numpy().squeeze()
+offset = 4 * np.arange(length)
+plt.plot(np.arange(d_model), (pe + offset[:, None]).T);
+plt.yticks(offset);
+fig.axes[0].set_yticklabels(offset // 4);
+plt.xlabel('dimension')
+plt.ylabel('position')
+plt.legend(["pos %d"%p for p in range(length)])
+```
+</div>
+</div>
+
+![plot showing sinusoids for all positions with length=16 and d_model=128]({{site.baseurl}}/assets/Transformer/pe_length_all.png)
+
+## Putting it together
+
+Now using all the classes and functions that we have written we can build a transformer. Write a `Transformer` class that is initialised with the following arguments:
+
+`num_src_tokens` | Number of tokens in the input / source dataset
+`num_tgt_tokens` | Number of tokens in the target dataset
+`model_dim` | Same as `d_model`
+`num_heads` | Number of attention heads in `MultiHeadAttention`
+`dropout` | Value between 0 and 1 indicating fraction of units to drop in dropout layers
+`ff_dim` | Number of hidden dimensions for the `FeedForward` block
+`num_encoder_blocks` | Number of `EncoderBlock` modules to use in `Encoder`
+`num_decoder_blocks` | Number of `DecoderBlock` modules to use in `Decoder`
+`share_embed_weights` | Whether to share the embedding weights for source and target, only applicable if `num_src_tokens`=`num_tgt_tokens`
+`share_softmax_weights` | Whether to share the weights between the output layer and the target embeddings
+
+This module will be called with the following inputs:
+- Batch of source sequences as tokens
+- Batch of target sequences as tokens 
+- Mask for the source sequence
+- Mask for the target sequence
+- A boolean `training`
+
+<div class="collapse-Transformer" markdown="0">
+<div markdown="1">
+```python
+class Transformer(tf.keras.models.Model):
+    def __init__(self,
+                 num_tokens,
+                 num_tgt_tokens,
+                 model_dim=256,
+                 num_heads=8,
+                 dropout=0.1,
+                 ff_dim=2048,
+                 num_encoder_blocks=6,
+                 num_decoder_blocks=6,
+                 share_embed_weights=False,
+                 share_output_weights=False):
+        super(Transformer, self).__init__()
+        self.share_embed_weights = share_embed_weights
+        self.shared_output_weights = share_output_weights
+        self.input_embedding = ScaledEmbedding(num_tokens, model_dim)
+        self.enc_pos_encoding = PositionalEncoding(model_dim, dropout)
+        self.dec_pos_encoding = PositionalEncoding(model_dim, dropout)
+
+        if not self.share_embed_weights:
+            self.target_embedding = ScaledEmbedding(num_tgt_tokens, model_dim)
+
+        self.encoder = Encoder(dim=model_dim,  # 256
+                               ff_dim=ff_dim,  # 2048
+                               num_heads=num_heads,  # 8
+                               dropout=dropout,
+                               num_blocks=num_encoder_blocks)
+
+        self.decoder = Decoder(dim=model_dim,  # 256
+                               ff_dim=ff_dim,  # 2048
+                               num_heads=num_heads,  # 8
+                               dropout=dropout,
+                               num_blocks=num_decoder_blocks)
+        if not self.shared_output_weights:
+            self.output_layer = tf.keras.layers.Dense(units=num_tgt_tokens)
+            # This works because this is called only after
+            # target_embedding is called so the weights will
+            # have been created
+            self.output_layer = lambda x, *a, **kw: tf.matmul(
+                x, self.target_embedding.weights[0], transpose_b=True)
+
+    def __call__(self, x, y, src_mask, tgt_mask, training=True):
+        x = self.input_embedding(x)
+        x = self.enc_pos_encoding(x, training=training)
+        memory = self.encoder(x, mask=src_mask, training=training)
+        if self.share_embed_weights:
+            y = self.input_embedding(y)
+        else:
+            y = self.target_embedding(y)
+        y = self.dec_pos_encoding(y, training=training)
+        out = self.decoder(y, memory,
+                            memory_mask=src_mask,
+                            decoder_mask=tgt_mask,
+                            training=training)
+
+        if self.shared_output_weights:
+            logits = self.output_layer(out)
+        else:
+            # This works because this is called only after
+            # target_embedding is called so the weights will
+            # have been created
+            logits = tf.matmul(out, self.target_embedding.weights[0], transpose_b=True)
+        return logits
+```
+</div>
+</div>
+
+## What's next
+We have built a `Transformer` but we are not done yet. The paper introduces some approaches to train the model and we need to implement those and we need to write to code to prepare the data and to process the outputs. In Part 2 (coming soon!) we will learn how to do all of these and train a translation model.
+
+
+## References 
+1. [Attention Is All You Need](https://arxiv.org/abs/1706.03762)
+2. [The Annotated Transformer](http://nlp.seas.harvard.edu/2018/04/03/attention.html)
